@@ -8,6 +8,15 @@ const albumBatches = new Map();
 const processedUpdates = new Set();
 const inFlightUpdates = new Map();
 
+// Telegram delivers each item of an album (media group) as a separate update.
+// We buffer them and flush once no new item has arrived for this long. The
+// window measures the gap BETWEEN items, so it must be comfortably larger than
+// Telegram's inter-item delay (usually a few hundred ms).
+const ALBUM_DEBOUNCE_MS = Number.parseInt(
+  process.env.ALBUM_DEBOUNCE_MS || "2500",
+  10,
+);
+
 function safeEqual(received, expected) {
   const left = Buffer.from(received || "");
   const right = Buffer.from(expected);
@@ -47,11 +56,30 @@ function enqueueAlbum(message) {
       albumBatches.delete(key);
       try {
         const result = await crosspostMessages(config, batch.messages);
+        console.log(
+          JSON.stringify({
+            level: "info",
+            event: "album_crossposted",
+            media_group_id: message.media_group_id,
+            items: batch.messages.length,
+          }),
+        );
         for (const waiter of batch.waiters) waiter.resolve(result);
       } catch (error) {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            event: "album_crosspost_failed",
+            media_group_id: message.media_group_id,
+            message: error?.message || "Неизвестная ошибка",
+            service: error?.service,
+            status: error?.status,
+            code: error?.code,
+          }),
+        );
         for (const waiter of batch.waiters) waiter.reject(error);
       }
-    }, 1500);
+    }, ALBUM_DEBOUNCE_MS);
   });
 }
 
@@ -73,7 +101,18 @@ async function processUpdate(update) {
     }),
   );
 
-  if (message.media_group_id) return enqueueAlbum(message);
+  if (message.media_group_id) {
+    // Acknowledge this album item immediately instead of awaiting the flush.
+    // Telegram delivers album items in order and holds the next one until the
+    // current is acked; if we blocked the response on the debounce+crosspost,
+    // each item would flush alone and become a separate MAX post. Enqueuing
+    // and returning fast lets every item join the same batch, which is then
+    // crossposted as a single MAX message in the background.
+    enqueueAlbum(message).catch(() => {
+      // Failures are logged inside the batch flush above.
+    });
+    return { queued: "album", media_group_id: message.media_group_id };
+  }
   return crosspostMessages(config, [message]);
 }
 
@@ -122,7 +161,10 @@ const server = createServer(async (request, response) => {
         level: "info",
         event: "telegram_post_processed",
         update_id: update.update_id,
-        result: result?.ignored || result?.duplicate ? result : "published",
+        result:
+          result?.ignored || result?.duplicate || result?.queued
+            ? result
+            : "published",
       }),
     );
     return json(response, 200, { ok: true });
