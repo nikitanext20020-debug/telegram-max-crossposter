@@ -2,11 +2,16 @@ import { createServer } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { loadConfig, sourceChatAllowed } from "./config.mjs";
 import { crosspostMessages } from "./crosspost.mjs";
+import { createPendingQueue } from "./pending.mjs";
 
 const config = loadConfig();
 const albumBatches = new Map();
 const processedUpdates = new Set();
 const inFlightUpdates = new Map();
+const settlingQueue = createPendingQueue({
+  delayMs: 10_000,
+  onReady: publishMessage,
+});
 
 function safeEqual(received, expected) {
   const left = Buffer.from(received || "");
@@ -55,8 +60,13 @@ function enqueueAlbum(message) {
   });
 }
 
+function publishMessage(message) {
+  if (message.media_group_id) return enqueueAlbum(message);
+  return crosspostMessages(config, [message]);
+}
+
 async function processUpdate(update) {
-  const message = update.channel_post;
+  const message = update.channel_post || update.edited_channel_post;
   if (!message) return { ignored: "not_channel_post" };
   if (!sourceChatAllowed(config, message.chat.id)) {
     return { ignored: "source_chat_not_allowed" };
@@ -70,11 +80,11 @@ async function processUpdate(update) {
       chat_id: message.chat.id,
       message_id: message.message_id,
       media_group_id: message.media_group_id ?? null,
+      edited: Boolean(update.edited_channel_post),
     }),
   );
 
-  if (message.media_group_id) return enqueueAlbum(message);
-  return crosspostMessages(config, [message]);
+  return settlingQueue.enqueue(message);
 }
 
 async function processOnce(update) {

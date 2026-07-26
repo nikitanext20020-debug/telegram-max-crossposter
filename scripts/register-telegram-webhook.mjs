@@ -25,7 +25,7 @@ const response = await fetch(
     body: JSON.stringify({
       url: `${publicUrl}/telegram`,
       secret_token: secret,
-      allowed_updates: ["channel_post"],
+      allowed_updates: ["channel_post", "edited_channel_post"],
       drop_pending_updates: false,
       max_connections: 20,
     }),
