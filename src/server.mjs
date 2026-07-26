@@ -10,8 +10,17 @@ const processedUpdates = new Set();
 const inFlightUpdates = new Map();
 const settlingQueue = createPendingQueue({
   delayMs: 10_000,
-  onReady: publishMessage,
+  onReady: (message) => crosspostMessages(config, [message]),
 });
+
+// Telegram delivers each item of an album (media group) as a separate update.
+// We buffer them and flush once no new item has arrived for this long. The
+// window measures the gap BETWEEN items, so it must be comfortably larger than
+// Telegram's inter-item delay (usually a few hundred ms).
+const ALBUM_DEBOUNCE_MS = Number.parseInt(
+  process.env.ALBUM_DEBOUNCE_MS || "2500",
+  10,
+);
 
 function safeEqual(received, expected) {
   const left = Buffer.from(received || "");
@@ -39,30 +48,54 @@ function rememberUpdate(updateId) {
 
 function enqueueAlbum(message) {
   const key = `${message.chat.id}:${message.media_group_id}`;
-  return new Promise((resolve, reject) => {
-    let batch = albumBatches.get(key);
-    if (!batch) {
-      batch = { messages: [], waiters: [], timer: null };
-      albumBatches.set(key, batch);
-    }
-    batch.messages.push(message);
-    batch.waiters.push({ resolve, reject });
-    clearTimeout(batch.timer);
-    batch.timer = setTimeout(async () => {
-      albumBatches.delete(key);
-      try {
-        const result = await crosspostMessages(config, batch.messages);
-        for (const waiter of batch.waiters) waiter.resolve(result);
-      } catch (error) {
-        for (const waiter of batch.waiters) waiter.reject(error);
-      }
-    }, 1500);
-  });
+  let batch = albumBatches.get(key);
+  if (!batch) {
+    batch = {
+      messages: new Map(),
+      timer: null,
+      settlingTimer: null,
+    };
+    albumBatches.set(key, batch);
+  }
+
+  batch.messages.set(message.message_id, message);
+  clearTimeout(batch.timer);
+  clearTimeout(batch.settlingTimer);
+  batch.timer = setTimeout(() => {
+    batch.timer = null;
+    batch.settlingTimer = setTimeout(() => flushAlbum(key), 10_000);
+  }, ALBUM_DEBOUNCE_MS);
 }
 
-function publishMessage(message) {
-  if (message.media_group_id) return enqueueAlbum(message);
-  return crosspostMessages(config, [message]);
+async function flushAlbum(key) {
+  const batch = albumBatches.get(key);
+  if (!batch) return;
+  albumBatches.delete(key);
+
+  const messages = [...batch.messages.values()];
+  try {
+    await crosspostMessages(config, messages);
+    console.log(
+      JSON.stringify({
+        level: "info",
+        event: "album_crossposted",
+        media_group_id: messages[0]?.media_group_id,
+        items: messages.length,
+      }),
+    );
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        event: "album_crosspost_failed",
+        media_group_id: messages[0]?.media_group_id,
+        message: error?.message || "Неизвестная ошибка",
+        service: error?.service,
+        status: error?.status,
+        code: error?.code,
+      }),
+    );
+  }
 }
 
 async function processUpdate(update) {
@@ -84,6 +117,16 @@ async function processUpdate(update) {
     }),
   );
 
+  if (message.media_group_id) {
+    // Acknowledge this album item immediately instead of awaiting the flush.
+    // Telegram delivers album items in order and holds the next one until the
+    // current is acked; if we blocked the response on the debounce+crosspost,
+    // each item would flush alone and become a separate MAX post. Enqueuing
+    // and returning fast lets every item join the same batch, which is then
+    // crossposted as a single MAX message in the background.
+    enqueueAlbum(message);
+    return { queued: "album", media_group_id: message.media_group_id };
+  }
   return settlingQueue.enqueue(message);
 }
 
@@ -132,7 +175,10 @@ const server = createServer(async (request, response) => {
         level: "info",
         event: "telegram_post_processed",
         update_id: update.update_id,
-        result: result?.ignored || result?.duplicate ? result : "published",
+        result:
+          result?.ignored || result?.duplicate || result?.queued
+            ? result
+            : "published",
       }),
     );
     return json(response, 200, { ok: true });
