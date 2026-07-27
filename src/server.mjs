@@ -8,8 +8,12 @@ const config = loadConfig();
 const albumBatches = new Map();
 const processedUpdates = new Set();
 const inFlightUpdates = new Map();
+const SETTLING_DELAY_MS = Number.parseInt(
+  process.env.SETTLING_DELAY_MS || "30000",
+  10,
+);
 const settlingQueue = createPendingQueue({
-  delayMs: 10_000,
+  delayMs: SETTLING_DELAY_MS,
   onReady: (message) => crosspostMessages(config, [message]),
 });
 
@@ -63,7 +67,7 @@ function enqueueAlbum(message) {
   clearTimeout(batch.settlingTimer);
   batch.timer = setTimeout(() => {
     batch.timer = null;
-    batch.settlingTimer = setTimeout(() => flushAlbum(key), 10_000);
+    batch.settlingTimer = setTimeout(() => flushAlbum(key), SETTLING_DELAY_MS);
   }, ALBUM_DEBOUNCE_MS);
 }
 
