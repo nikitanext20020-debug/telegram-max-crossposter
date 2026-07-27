@@ -18,7 +18,7 @@ const settlingQueue = createPendingQueue({
 // window measures the gap BETWEEN items, so it must be comfortably larger than
 // Telegram's inter-item delay (usually a few hundred ms).
 const ALBUM_DEBOUNCE_MS = Number.parseInt(
-  process.env.ALBUM_DEBOUNCE_MS || "30000",
+  process.env.ALBUM_DEBOUNCE_MS || "50000",
   10,
 );
 
