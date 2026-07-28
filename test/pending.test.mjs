@@ -120,6 +120,24 @@ test("does not publish twice when receiving channel_post and edited_channel_post
   assert.equal(r2, "ok");
 });
 
+test("ignores an edit that arrives after the post was already published", () => {
+  const timers = createFakeTimers();
+  const published = [];
+  const queue = createPendingQueue({
+    delayMs: 10_000,
+    onReady: (item) => published.push(item),
+    setTimeoutImpl: timers.setTimeout,
+    clearTimeoutImpl: timers.clearTimeout,
+  });
+
+  queue.enqueue(message(6, "Исходный текст"));
+  timers.advance(10_000);
+  queue.enqueue(message(6, "Исправленный текст"));
+  timers.advance(10_000);
+
+  assert.deepEqual(published, [message(6, "Исходный текст")]);
+});
+
 test("album items with same media_group_id are not handled by settlingQueue", async () => {
   const published = [];
   const queue = createPendingQueue({

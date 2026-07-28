@@ -7,9 +7,19 @@ export function createPendingQueue({
   clearTimeoutImpl = clearTimeout,
 }) {
   const pending = new Map();
+  const published = new Set();
+
+  function rememberPublished(key) {
+    published.add(key);
+    if (published.size > 5000) {
+      published.delete(published.values().next().value);
+    }
+  }
 
   function enqueue(message) {
     const key = messageKey(message);
+    if (published.has(key)) return Promise.resolve({ ignored: "already_published" });
+
     const existing = pending.get(key);
     if (existing) clearTimeoutImpl(existing.timer);
 
@@ -31,10 +41,12 @@ export function createPendingQueue({
       }
 
       pending.delete(key);
+      rememberPublished(key);
       try {
         const value = await onReady(entry.message);
         for (const waiter of entry.waiters) waiter.resolve(value);
       } catch (error) {
+        published.delete(key);
         for (const waiter of entry.waiters) waiter.reject(error);
       }
     }, delayMs);
