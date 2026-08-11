@@ -1,0 +1,110 @@
+diff --git a/README.md b/README.md
+index b7666a8..39d1440 100644
+--- a/README.md
++++ b/README.md
+@@ -119,9 +119,9 @@ npm run check:webhook
+ 
+ ## Ограничения
+ 
+-- Telegram Bot API позволяет скачивать файлы размером до 20 МБ. Более крупный
+-  файл не будет перенесён, а Telegram повторит webhook; ошибка будет видна в
+-  логах Koyeb.
++- Telegram Bot API позволяет скачивать файлы размером до 20 МБ. Более крупное
++  вложение будет пропущено, а текст поста с пояснением всё равно отправится в
++  MAX; webhook завершится успешно и не зациклится на одном update.
+ - Новый пост переносится автоматически. Редактирование и удаление уже
+   опубликованного Telegram-поста не изменяет копию в MAX.
+ - MAX разрешает до 12 фото/видео в одном сообщении; большие наборы делятся.
+diff --git a/src/telegram.mjs b/src/telegram.mjs
+index 9f7b2a3..83c130d 100644
+--- a/src/telegram.mjs
++++ b/src/telegram.mjs
+@@ -38,12 +38,24 @@ async function telegramCall(token, method, body, fetchImpl = fetch) {
+ }
+ 
+ export async function downloadTelegramFile(token, file, fetchImpl = fetch) {
+-  const info = await telegramCall(
+-    token,
+-    "getFile",
+-    { file_id: file.fileId },
+-    fetchImpl,
+-  );
++  let info;
++  try {
++    info = await telegramCall(
++      token,
++      "getFile",
++      { file_id: file.fileId },
++      fetchImpl,
++    );
++  } catch (error) {
++    if (
++      error instanceof RemoteApiError &&
++      error.code === 400 &&
++      /file is too big/i.test(error.message)
++    ) {
++      throw new TelegramFileTooLargeError(TELEGRAM_DOWNLOAD_LIMIT + 1);
++    }
++    throw error;
++  }
+   if (info.file_size > TELEGRAM_DOWNLOAD_LIMIT) {
+     throw new TelegramFileTooLargeError(info.file_size);
+   }
+diff --git a/test/crosspost.test.mjs b/test/crosspost.test.mjs
+index dc23961..1e1cbd3 100644
+--- a/test/crosspost.test.mjs
++++ b/test/crosspost.test.mjs
+@@ -139,3 +139,53 @@ test("album of several photos becomes a single MAX post", async () => {
+     'Общая подпись\n\n<a href="https://example.com/">Подписаться</a>',
+   );
+ });
++
++test("skips a file when Telegram getFile returns file is too big", async () => {
++  const calls = [];
++  const fakeFetch = async (url, init = {}) => {
++    const target = String(url);
++    if (target.includes("getFile")) {
++      return Response.json(
++        {
++          ok: false,
++          error_code: 400,
++          description: "Bad Request: file is too big",
++        },
++        { status: 400 },
++      );
++    }
++    if (target.includes("/messages?")) {
++      calls.push(JSON.parse(init.body));
++      return Response.json({ message: { id: "max-message-1" } });
++    }
++    throw new Error(`Unexpected URL in test: ${target}`);
++  };
++
++  await crosspostMessages(
++    {
++      telegramToken: "telegram-token",
++      maxToken: "max-token",
++      maxChatId: "123",
++      signatureText: "Подписаться",
++      signatureUrl: "https://example.com",
++      maxNotify: true,
++      disableLinkPreview: false,
++    },
++    [
++      {
++        message_id: 12,
++        chat: { id: -100 },
++        caption: "Большое видео",
++        video: { file_id: "large-video-id", file_size: 25 * 1024 * 1024 },
++      },
++    ],
++    { externalFetch: fakeFetch, maxFetch: fakeFetch },
++  );
++
++  assert.equal(calls.length, 1);
++  assert.equal(calls[0].attachments, null);
++  assert.equal(
++    calls[0].text,
++    'Большое видео\n\n<i>Вложение больше 20 МБ и не перенесено из Telegram.</i>\n\n<a href="https://example.com/">Подписаться</a>',
++  );
++});

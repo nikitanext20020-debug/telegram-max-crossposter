@@ -139,3 +139,53 @@ test("album of several photos becomes a single MAX post", async () => {
     'Общая подпись\n\n<a href="https://example.com/">Подписаться</a>',
   );
 });
+
+test("skips a file when Telegram getFile returns file is too big", async () => {
+  const calls = [];
+  const fakeFetch = async (url, init = {}) => {
+    const target = String(url);
+    if (target.includes("getFile")) {
+      return Response.json(
+        {
+          ok: false,
+          error_code: 400,
+          description: "Bad Request: file is too big",
+        },
+        { status: 400 },
+      );
+    }
+    if (target.includes("/messages?")) {
+      calls.push(JSON.parse(init.body));
+      return Response.json({ message: { id: "max-message-1" } });
+    }
+    throw new Error(`Unexpected URL in test: ${target}`);
+  };
+
+  await crosspostMessages(
+    {
+      telegramToken: "telegram-token",
+      maxToken: "max-token",
+      maxChatId: "123",
+      signatureText: "Подписаться",
+      signatureUrl: "https://example.com",
+      maxNotify: true,
+      disableLinkPreview: false,
+    },
+    [
+      {
+        message_id: 12,
+        chat: { id: -100 },
+        caption: "Большое видео",
+        video: { file_id: "large-video-id", file_size: 25 * 1024 * 1024 },
+      },
+    ],
+    { externalFetch: fakeFetch, maxFetch: fakeFetch },
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].attachments, null);
+  assert.equal(
+    calls[0].text,
+    'Большое видео\n\n<i>Вложение больше 20 МБ и не перенесено из Telegram.</i>\n\n<a href="https://example.com/">Подписаться</a>',
+  );
+});

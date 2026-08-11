@@ -1,0 +1,81 @@
+BRANCH=fix/telegram-file-too-big-loop
+CHANGED_FIELD=Telegram getFile HTTP/API 400 "Bad Request: file is too big" classification
+
+ROOT_CAUSE:
+Telegram rejects getFile for Bot API files over 20 MiB before returning file_size.
+downloadTelegramFile propagated that response as RemoteApiError instead of the
+already-supported TelegramFileTooLargeError. crosspostMessages therefore
+rejected, the webhook returned HTTP 500, and Telegram redelivered the same
+update_id indefinitely.
+
+CHANGED_BEHAVIOR:
+downloadTelegramFile now translates only Telegram error code 400 containing
+"file is too big" into TelegramFileTooLargeError. crosspostMessages catches it,
+omits the oversized attachment, sends the text and explanatory fallback to MAX,
+and resolves so the webhook can acknowledge and remember the update.
+
+ARTIFACTS:
+MODIFIED_FILE=C:\BOTS\CROSS\telegram-max-crossposter-fixed\src\telegram.mjs
+DIFF_FILE=C:\BOTS\CROSS\telegram-max-crossposter-fixed\artifacts\telegram-file-too-big.patch
+VERIFICATION_FILE=C:\BOTS\CROSS\telegram-max-crossposter-fixed\VERIFICATION.txt
+ROLLBACK_FILE=C:\BOTS\CROSS\telegram-max-crossposter-fixed\artifacts\ROLLBACK.sh
+
+ORIGINAL:
+COMMIT=01ac4ff05feda7666f127f3b92d9513c7fdc3bd8
+FILE=src/telegram.mjs
+SHA256=0160e426ffcc7a78fd8f1f7092194fc526a21327ab3d918732153899483faa91
+
+TDD_RED:
+COMMAND=node --test --test-name-pattern="skips a file when Telegram getFile returns file is too big" test/crosspost.test.mjs
+INPUT=Regression test with getFile returning HTTP 400 and JSON description "Bad Request: file is too big"; production source still original.
+LITERAL_RESULT=Error [RemoteApiError]: Telegram: Bad Request: file is too big
+EXIT_STATUS=1
+
+BASELINE:
+WORKDIR=C:\BOTS\CROSS\telegram-max-crossposter
+COMMAND=npm test -- --test-reporter=dot
+INPUT=Original repository at commit 01ac4ff05feda7666f127f3b92d9513c7fdc3bd8
+LITERAL_OUTPUT:
+> telegram-to-max-crossposter@1.0.0 test
+> node --test --test-reporter=dot
+
+...............
+EXIT_STATUS=0
+RESULT=15 baseline tests passed; 0 failed.
+
+MODIFIED:
+WORKDIR=C:\BOTS\CROSS\telegram-max-crossposter-fixed
+COMMAND=npm test -- --test-reporter=dot
+INPUT=Branch fix/telegram-file-too-big-loop with source change and regression test.
+LITERAL_OUTPUT:
+> telegram-to-max-crossposter@1.0.0 test
+> node --test --test-reporter=dot
+
+................
+EXIT_STATUS=0
+RESULT=16 modified tests passed; 0 failed, including the oversized getFile regression.
+
+ROLLBACK:
+WORKDIR=C:\BOTS\CROSS\telegram-max-crossposter-rollback-check
+COMMAND="C:\Program Files\Git\bin\bash.exe" artifacts/ROLLBACK.sh
+INPUT=Separate repository copy after artifacts/telegram-file-too-big.patch was applied.
+LITERAL_OUTPUT:
+ROLLBACK_RESULT=restored README.md, src/telegram.mjs, and test/crosspost.test.mjs
+EXIT_STATUS=0
+
+RESTORED_STATUS:
+COMMAND=git diff --exit-code -- README.md src/telegram.mjs test/crosspost.test.mjs
+LITERAL_OUTPUT=<empty>
+EXIT_STATUS=0
+RESTORED_SHA256=0160e426ffcc7a78fd8f1f7092194fc526a21327ab3d918732153899483faa91
+ORIGINAL_SHA256=0160e426ffcc7a78fd8f1f7092194fc526a21327ab3d918732153899483faa91
+COMMAND=npm test -- --test-reporter=dot
+LITERAL_OUTPUT:
+> telegram-to-max-crossposter@1.0.0 test
+> node --test --test-reporter=dot
+
+...............
+EXIT_STATUS=0
+RESULT=Rollback restored original source hash, original tracked behavior, and 15/15 baseline tests.
+
+MODIFIED_FILE_LEFT_CHANGED=yes
