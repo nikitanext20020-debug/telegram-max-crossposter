@@ -38,12 +38,24 @@ async function telegramCall(token, method, body, fetchImpl = fetch) {
 }
 
 export async function downloadTelegramFile(token, file, fetchImpl = fetch) {
-  const info = await telegramCall(
-    token,
-    "getFile",
-    { file_id: file.fileId },
-    fetchImpl,
-  );
+  let info;
+  try {
+    info = await telegramCall(
+      token,
+      "getFile",
+      { file_id: file.fileId },
+      fetchImpl,
+    );
+  } catch (error) {
+    if (
+      error instanceof RemoteApiError &&
+      error.code === 400 &&
+      /file is too big/i.test(error.message)
+    ) {
+      throw new TelegramFileTooLargeError(TELEGRAM_DOWNLOAD_LIMIT + 1);
+    }
+    throw error;
+  }
   if (info.file_size > TELEGRAM_DOWNLOAD_LIMIT) {
     throw new TelegramFileTooLargeError(info.file_size);
   }
