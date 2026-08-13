@@ -354,11 +354,23 @@ class Store:
             candidate_id = result.scalar_one_or_none()
             if candidate_id is not None:
                 await session.execute(
+                    update(Candidate).where(Candidate.id == candidate_id).values(state="published")
+                )
+                await session.execute(
                     update(MediaHash)
                     .where(MediaHash.candidate_id == candidate_id)
                     .values(max_message_ids=max_message_ids)
                 )
             return candidate_id is not None
+
+    async def mark_candidate_published(self, candidate_id: int) -> bool:
+        async with self.database.session() as session, session.begin():
+            result = await session.execute(
+                update(Candidate)
+                .where(Candidate.id == candidate_id, Candidate.state != "published")
+                .values(state="published")
+            )
+            return bool(result.rowcount)
 
     async def fail_item(
         self, queue_item_id: int, lease_token: str, error: str, *, state: str = "failed"

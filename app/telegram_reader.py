@@ -376,6 +376,35 @@ class TelegramReader:
         )
         return source, message
 
+    async def import_post(self, link: str) -> int:
+        source, message = await self.get_post(link)
+        text = getattr(message, "message", None) or getattr(message, "raw_text", "")
+        clean = clean_telegram_text(
+            text,
+            _text_entities(message),
+            button_urls=_button_urls([message]),
+        )
+        cleaned_html = render_max_html(clean)
+        media_item = _media_item(message)
+        media = (media_item,) if media_item else ()
+        candidate = CandidateInput(
+            source_id=source.id,
+            telegram_chat_id=source.telegram_chat_id,
+            message_ids=(message.id,),
+            album_group_id=str(message.grouped_id)
+            if getattr(message, "grouped_id", None)
+            else None,
+            published_at=_aware_utc(message.date),
+            cleaned_html=cleaned_html,
+            media=media,
+            views=int(getattr(message, "views", 0) or 0),
+            forwards=int(getattr(message, "forwards", 0) or 0),
+            reactions=_reaction_count(message),
+            metadata_fingerprint=metadata_fingerprint(cleaned_html, media),
+        )
+        result = await self.store.upsert_candidate(candidate)
+        return result.candidate_id
+
     async def download_candidate(self, candidate: Candidate, directory: Path) -> list[Path]:
         directory.mkdir(parents=True, exist_ok=True)
         async with self._client() as client:

@@ -24,6 +24,16 @@ class FakeReader:
         return [path]
 
 
+class ImportingFakeReader(FakeReader):
+    def __init__(self, candidate_id, content=b"video"):
+        super().__init__(content)
+        self.candidate_id = candidate_id
+
+    async def import_post(self, link):
+        self.imported_link = link
+        return self.candidate_id
+
+
 class SparseLargeReader(FakeReader):
     async def download_candidate(self, candidate, directory):
         self.directories.append(Path(directory))
@@ -198,3 +208,20 @@ async def test_ambiguous_max_send_is_never_automatically_retried(publish_store):
     assert outcome.state == "ambiguous"
     assert len(max_client.sent) == 1
     assert (await store.list_queue())[0].state == "ambiguous"
+
+
+async def test_now_publishes_immediately_without_consuming_scheduled_row(publish_store):
+    store, source = publish_store
+    candidate_id, due = await queued_video(store, source)
+    reader = ImportingFakeReader(candidate_id)
+    max_client = FakeMaxClient()
+    publisher = Publisher(store, reader, max_client)
+
+    immediate = await publisher.publish_now("https://t.me/source/1")
+    queue_after_now = await store.list_queue()
+    scheduled = await publisher.publish_due(due)
+
+    assert immediate.state == "published"
+    assert queue_after_now[0].state == "pending"
+    assert scheduled.state == "skipped_duplicate"
+    assert len(max_client.sent) == 1
