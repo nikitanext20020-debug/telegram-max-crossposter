@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import time
 from enum import StrEnum
 from types import MappingProxyType
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
 class ContentType(StrEnum):
@@ -77,6 +77,21 @@ def _schedule(value: str | None) -> tuple[ScheduleRule, ...]:
     return tuple(sorted(rules, key=lambda rule: rule.time))
 
 
+def _database_url(env: Mapping[str, str]) -> str:
+    raw = _required(env, "DATABASE_URL")
+    parts = urlsplit(raw)
+    if parts.scheme not in {"postgres", "postgresql", "postgresql+asyncpg"}:
+        return raw
+    query = []
+    for name, value in parse_qsl(parts.query, keep_blank_values=True):
+        if name == "channel_binding":
+            continue
+        query.append(("ssl" if name == "sslmode" else name, value))
+    return urlunsplit(
+        ("postgresql+asyncpg", parts.netloc, parts.path, urlencode(query), parts.fragment)
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     telegram_api_id: int
@@ -114,7 +129,7 @@ class Settings:
             telegram_admin_bot_token=_required(env, "TELEGRAM_ADMIN_BOT_TOKEN"),
             telegram_webhook_secret=webhook_secret,
             owner_telegram_id=_positive_int(env, "OWNER_TELEGRAM_ID", 8235497168),
-            database_url=_required(env, "DATABASE_URL"),
+            database_url=_database_url(env),
             max_bot_token=_required(env, "MAX_BOT_TOKEN"),
             max_chat_id=_required(env, "MAX_CHAT_ID"),
             qstash_token=_required(env, "QSTASH_TOKEN"),

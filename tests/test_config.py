@@ -80,3 +80,11 @@ def test_missing_secret_names_variable_without_echoing_other_values(complete_env
 
     assert str(raised.value) == "Не задана обязательная переменная MAX_BOT_TOKEN"
     assert "session-value" not in str(raised.value)
+
+
+def test_normalizes_neon_url_for_asyncpg(complete_env):
+    complete_env["DATABASE_URL"] = (
+        "postgresql://user:pass@host/db?sslmode=require&channel_binding=require"
+    )
+    settings = Settings.from_env(complete_env)
+    assert settings.database_url == ("postgresql+asyncpg://user:pass@host/db?ssl=require")

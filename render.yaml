@@ -8,23 +8,37 @@ services:
     envVars:
       - key: PORT
         value: "10000"
-      - key: TELEGRAM_BOT_TOKEN
+      - key: TELEGRAM_API_ID
+        sync: false
+      - key: TELEGRAM_API_HASH
+        sync: false
+      - key: TELEGRAM_SESSION_STRING
+        sync: false
+      - key: TELEGRAM_ADMIN_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: OWNER_TELEGRAM_ID
+        value: "8235497168"
+      - key: DATABASE_URL
         sync: false
       - key: MAX_BOT_TOKEN
         sync: false
       - key: MAX_CHAT_ID
         sync: false
-      - key: TELEGRAM_WEBHOOK_SECRET
-        sync: false
-      - key: TELEGRAM_SOURCE_CHAT_IDS
-        value: ""
-      - key: MAX_SIGNATURE_TEXT
-        value: "ЛУЧШИЙ ВПН (БЕСПЛАТНО)"
-      - key: MAX_SIGNATURE_URL
-        value: "https://nosokvpn.com/?ref=p1_UAkMu8To0LPBeXr55PI"
-      - key: MAX_NOTIFY
-        value: "true"
-      - key: MAX_DISABLE_LINK_PREVIEW
-        value: "false"
       - key: MAX_API_BASE
         value: "https://platform-api2.max.ru"
+      - key: MAX_SIGNATURE_TEXT
+        value: "НАШ ТГК"
+      - key: MAX_SIGNATURE_URL
+        value: "https://t.me/webm4ik"
+      - key: QSTASH_TOKEN
+        sync: false
+      - key: QSTASH_CURRENT_SIGNING_KEY
+        sync: false
+      - key: QSTASH_NEXT_SIGNING_KEY
+        sync: false
+      - key: PUBLIC_URL
+        sync: false
+      - key: DEFAULT_SCHEDULE
+        value: "08:00:any,10:00:any,12:00:any,14:00:video,18:00:any,21:00:any"

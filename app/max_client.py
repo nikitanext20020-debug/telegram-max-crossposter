@@ -162,6 +162,9 @@ class MaxClient:
             raise MaxApiError("MAX не вернул токен загруженного файла")
         return {"type": media_type, "payload": {"token": token}}
 
+    async def get(self, path: str) -> dict:
+        return await self._api_request("GET", path)
+
     async def send(self, html_text: str, attachments: list[dict]) -> str:
         path = "/messages?" + str(
             httpx.QueryParams(

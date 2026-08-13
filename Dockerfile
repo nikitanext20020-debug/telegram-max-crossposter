@@ -1,16 +1,25 @@
-FROM node:22-alpine
+FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY package.json ./
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PORT=10000
+
+RUN groupadd --system crossposter \
+    && useradd --system --gid crossposter --home-dir /app crossposter
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --requirement requirements.txt
+
 COPY certs ./certs
-COPY src ./src
+COPY migrations ./migrations
+COPY app ./app
 
-ENV NODE_ENV=production
-ENV PORT=8000
+RUN chown -R crossposter:crossposter /app
 
-EXPOSE 8000
+EXPOSE 10000
 
-USER node
+USER crossposter
 
-CMD ["node", "src/server.mjs"]
+CMD ["sh", "-c", "exec uvicorn app.main:create_app_from_env --factory --host 0.0.0.0 --port ${PORT:-10000}"]
