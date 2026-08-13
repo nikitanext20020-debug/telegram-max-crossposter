@@ -349,8 +349,16 @@ class Store:
                     max_message_ids=max_message_ids,
                     published_at=datetime.now(UTC),
                 )
+                .returning(QueueItem.candidate_id)
             )
-            return bool(result.rowcount)
+            candidate_id = result.scalar_one_or_none()
+            if candidate_id is not None:
+                await session.execute(
+                    update(MediaHash)
+                    .where(MediaHash.candidate_id == candidate_id)
+                    .values(max_message_ids=max_message_ids)
+                )
+            return candidate_id is not None
 
     async def fail_item(
         self, queue_item_id: int, lease_token: str, error: str, *, state: str = "failed"
@@ -376,12 +384,46 @@ class Store:
         async with self.database.session() as session:
             return await session.get(QueueItem, queue_item_id)
 
-    async def record_media_hash(self, sha256: str, candidate_id: int) -> bool:
+    async def get_candidate(self, candidate_id: int) -> Candidate | None:
+        async with self.database.session() as session:
+            row = await session.get(Candidate, candidate_id)
+            if row and row.published_at.tzinfo is None:
+                row.published_at = row.published_at.replace(tzinfo=UTC)
+            return row
+
+    async def reserve_media_hashes(self, hashes: list[str], candidate_id: int) -> bool:
+        unique_hashes = sorted(set(hashes))
+        if not unique_hashes:
+            return True
         async with self.database.session() as session, session.begin():
+            existing = list(
+                await session.scalars(select(MediaHash).where(MediaHash.sha256.in_(unique_hashes)))
+            )
+            if any(row.candidate_id != candidate_id for row in existing):
+                return False
+            existing_hashes = {row.sha256 for row in existing}
             try:
                 async with session.begin_nested():
-                    session.add(MediaHash(sha256=sha256, candidate_id=candidate_id))
+                    session.add_all(
+                        MediaHash(sha256=value, candidate_id=candidate_id)
+                        for value in unique_hashes
+                        if value not in existing_hashes
+                    )
                     await session.flush()
             except IntegrityError:
-                return False
+                rows = list(
+                    await session.scalars(
+                        select(MediaHash).where(MediaHash.sha256.in_(unique_hashes))
+                    )
+                )
+                return len(rows) == len(unique_hashes) and all(
+                    row.candidate_id == candidate_id for row in rows
+                )
             return True
+
+    async def record_media_hash(self, sha256: str, candidate_id: int) -> bool:
+        async with self.database.session() as session:
+            existing = await session.get(MediaHash, sha256)
+            if existing is not None:
+                return False
+        return await self.reserve_media_hashes([sha256], candidate_id)

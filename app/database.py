@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -15,9 +15,17 @@ from app.models import Base
 class Database:
     def __init__(self, url: str):
         self.engine = create_async_engine(url, pool_pre_ping=True)
+        if url.startswith("sqlite"):
+            event.listen(self.engine.sync_engine, "connect", self._enable_sqlite_fks)
         self.session_factory = async_sessionmaker(
             self.engine, class_=AsyncSession, expire_on_commit=False
         )
+
+    @staticmethod
+    def _enable_sqlite_fks(connection, _record) -> None:
+        cursor = connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
     async def start(self) -> None:
         async with self.engine.begin() as connection:
