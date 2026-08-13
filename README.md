@@ -186,7 +186,7 @@ Render Free засыпает после простоя. Это ожидаемо:
 ## Проверки
 
 ```bash
-.venv/bin/pytest -q
+.venv/bin/python -m pytest -q
 .venv/bin/ruff check app tests
 .venv/bin/ruff format --check app tests
 docker build -t telegram-max-crossposter .
