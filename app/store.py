@@ -132,11 +132,23 @@ class Store:
             query = select(Source).order_by(Source.id)
             if enabled_only:
                 query = query.where(Source.enabled.is_(True))
-            return list(await session.scalars(query))
+            rows = list(await session.scalars(query))
+            for row in rows:
+                self._normalize_source_datetimes(row)
+            return rows
+
+    @staticmethod
+    def _normalize_source_datetimes(row: Source) -> Source:
+        for name in ("last_scanned_at", "retry_after", "created_at"):
+            value = getattr(row, name)
+            if value is not None and value.tzinfo is None:
+                setattr(row, name, value.replace(tzinfo=UTC))
+        return row
 
     async def get_source(self, source_id: int) -> Source | None:
         async with self.database.session() as session:
-            return await session.get(Source, source_id)
+            row = await session.get(Source, source_id)
+            return self._normalize_source_datetimes(row) if row else None
 
     async def disable_source(self, source_id: int) -> bool:
         async with self.database.session() as session, session.begin():
@@ -144,6 +156,25 @@ class Store:
                 update(Source).where(Source.id == source_id).values(enabled=False)
             )
             return bool(result.rowcount)
+
+    async def update_source_scan(
+        self,
+        source_id: int,
+        *,
+        cursor_message_id: int | None,
+        last_scanned_at: datetime,
+        retry_after: datetime | None = None,
+    ) -> None:
+        async with self.database.session() as session, session.begin():
+            await session.execute(
+                update(Source)
+                .where(Source.id == source_id)
+                .values(
+                    cursor_message_id=cursor_message_id,
+                    last_scanned_at=last_scanned_at,
+                    retry_after=retry_after,
+                )
+            )
 
     @staticmethod
     def _source_post_key(candidate: CandidateInput) -> str:
