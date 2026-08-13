@@ -86,3 +86,9 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     version varchar(100) PRIMARY KEY,
     applied_at timestamptz NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS job_locks (
+    name varchar(100) PRIMARY KEY,
+    token varchar(64) NOT NULL,
+    lease_until timestamptz NOT NULL
+);

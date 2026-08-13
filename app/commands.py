@@ -161,10 +161,33 @@ class CommandService:
         return HandleResult(accepted=True)
 
     async def _safe_execute(self, command: Command, chat_id: int) -> None:
+        lock_names = {
+            "add_source": "content-maintenance",
+            "parse": "content-maintenance",
+            "parse_period": "content-maintenance",
+            "parse_from": "content-maintenance",
+            "parse_top": "content-maintenance",
+            "refresh": "content-maintenance",
+            "now": "immediate-publish",
+        }
+        lock_name = lock_names.get(command.name)
+        lock_token = None
         try:
+            if lock_name:
+                lock_token = await self.store.acquire_job_lock(
+                    lock_name, datetime.now(UTC), lease_seconds=30 * 60
+                )
+                if lock_token is None:
+                    await self.bot.send_message(
+                        chat_id, "Другое задание этого типа уже выполняется"
+                    )
+                    return
             await self._execute(command, chat_id)
         except Exception as error:
             await self.bot.send_message(chat_id, f"Ошибка: {error}")
+        finally:
+            if lock_name and lock_token:
+                await self.store.release_job_lock(lock_name, lock_token)
 
     async def _execute(self, command: Command, chat_id: int) -> None:
         handler = getattr(self, f"_command_{command.name}")

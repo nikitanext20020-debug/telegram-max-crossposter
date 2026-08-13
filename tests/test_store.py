@@ -181,3 +181,18 @@ async def test_final_hash_can_only_be_published_once(store):
 
     assert await store.record_media_hash("a" * 64, first.candidate_id) is True
     assert await store.record_media_hash("a" * 64, second.candidate_id) is False
+
+
+async def test_job_lock_blocks_overlap_and_recovers_after_expiry(store):
+    now = datetime(2026, 8, 14, tzinfo=UTC)
+    first = await store.acquire_job_lock("maintenance", now, lease_seconds=60)
+    blocked = await store.acquire_job_lock("maintenance", now, lease_seconds=60)
+    recovered = await store.acquire_job_lock(
+        "maintenance", now + timedelta(seconds=61), lease_seconds=60
+    )
+
+    assert first
+    assert blocked is None
+    assert recovered and recovered != first
+    assert await store.release_job_lock("maintenance", first) is False
+    assert await store.release_job_lock("maintenance", recovered) is True

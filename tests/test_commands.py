@@ -271,3 +271,16 @@ async def test_invalid_command_returns_actionable_error(command_setup):
     service, _, bot, *_ = command_setup
     await service.handle_update(update("/slot 99:99 audio"))
     assert "Ошибка" in bot.messages[-1][1]
+
+
+async def test_conflicting_long_command_reports_existing_job(command_setup):
+    service, store, bot, reader, *_ = command_setup
+    token = await store.acquire_job_lock(
+        "content-maintenance", datetime.now(UTC), lease_seconds=600
+    )
+
+    await service.handle_update(update("/parse"))
+
+    assert token
+    assert reader.windows == []
+    assert "уже выполняется" in bot.messages[-1][1]

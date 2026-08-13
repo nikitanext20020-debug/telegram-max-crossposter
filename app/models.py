@@ -138,3 +138,11 @@ class PublishAttempt(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
+
+
+class JobLock(Base):
+    __tablename__ = "job_locks"
+
+    name: Mapped[str] = mapped_column(String(100), primary_key=True)
+    token: Mapped[str] = mapped_column(String(64), nullable=False)
+    lease_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

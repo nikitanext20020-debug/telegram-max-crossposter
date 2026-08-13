@@ -10,7 +10,15 @@ from sqlalchemy.exc import IntegrityError
 from app.config import ContentType, ScheduleRule
 from app.database import Database
 from app.domain import CandidateInput, telegram_media_identity
-from app.models import Candidate, MediaHash, QueueItem, ScheduleSlot, SettingsRow, Source
+from app.models import (
+    Candidate,
+    JobLock,
+    MediaHash,
+    QueueItem,
+    ScheduleSlot,
+    SettingsRow,
+    Source,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -439,3 +447,30 @@ class Store:
             if existing is not None:
                 return False
         return await self.reserve_media_hashes([sha256], candidate_id)
+
+    async def acquire_job_lock(self, name: str, now: datetime, *, lease_seconds: int) -> str | None:
+        token = uuid.uuid4().hex
+        lease_until = now + timedelta(seconds=lease_seconds)
+        async with self.database.session() as session, session.begin():
+            updated = await session.execute(
+                update(JobLock)
+                .where(JobLock.name == name, JobLock.lease_until <= now)
+                .values(token=token, lease_until=lease_until)
+                .returning(JobLock.token)
+            )
+            if updated.scalar_one_or_none() is not None:
+                return token
+            try:
+                async with session.begin_nested():
+                    session.add(JobLock(name=name, token=token, lease_until=lease_until))
+                    await session.flush()
+            except IntegrityError:
+                return None
+            return token
+
+    async def release_job_lock(self, name: str, token: str) -> bool:
+        async with self.database.session() as session, session.begin():
+            result = await session.execute(
+                delete(JobLock).where(JobLock.name == name, JobLock.token == token)
+            )
+            return bool(result.rowcount)
