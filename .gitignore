@@ -5,3 +5,8 @@ node_modules/
 npm-debug.log*
 .DS_Store
 .worktrees/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/

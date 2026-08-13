@@ -1,0 +1,8 @@
+fastapi==0.116.1
+httpx==0.28.1
+qstash==3.0.0
+SQLAlchemy[asyncio]==2.0.43
+asyncpg==0.30.0
+Telethon==1.44.0
+uvicorn[standard]==0.35.0
+
