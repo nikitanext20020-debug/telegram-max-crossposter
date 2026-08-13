@@ -20,6 +20,19 @@ class CandidateInsertResult:
     duplicate_reason: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class QueueView:
+    id: int
+    candidate_id: int
+    scheduled_at: datetime
+    slot_rule: str
+    state: str
+    source_id: int
+    source_title: str
+    source_post_key: str
+    media_kind: str
+
+
 class Store:
     def __init__(self, database: Database):
         self.database = database
@@ -215,6 +228,50 @@ class Store:
             except IntegrityError:
                 return False
             return True
+
+    async def list_unqueued_candidates(self) -> list[Candidate]:
+        async with self.database.session() as session:
+            result = await session.scalars(
+                select(Candidate)
+                .join(Source, Source.id == Candidate.source_id)
+                .outerjoin(QueueItem, QueueItem.candidate_id == Candidate.id)
+                .where(
+                    Source.enabled.is_(True),
+                    Candidate.state == "eligible",
+                    QueueItem.id.is_(None),
+                )
+                .order_by(Candidate.published_at.desc(), Candidate.id.desc())
+            )
+            return list(result)
+
+    async def list_queue(self) -> list[QueueView]:
+        async with self.database.session() as session:
+            rows = await session.execute(
+                select(
+                    QueueItem.id,
+                    QueueItem.candidate_id,
+                    QueueItem.scheduled_at,
+                    QueueItem.slot_rule,
+                    QueueItem.state,
+                    Candidate.source_id,
+                    Source.title,
+                    Candidate.source_post_key,
+                    Candidate.media_kind,
+                )
+                .join(Candidate, Candidate.id == QueueItem.candidate_id)
+                .join(Source, Source.id == Candidate.source_id)
+                .order_by(QueueItem.scheduled_at, QueueItem.id)
+            )
+            return [QueueView(*row) for row in rows]
+
+    async def delete_unpublished_queue(self) -> int:
+        async with self.database.session() as session, session.begin():
+            result = await session.execute(
+                delete(QueueItem).where(
+                    QueueItem.state.in_({"pending", "failed", "skipped_duplicate"})
+                )
+            )
+            return result.rowcount or 0
 
     async def claim_due_item(self, now: datetime, *, lease_seconds: int = 300) -> QueueItem | None:
         token = uuid.uuid4().hex
