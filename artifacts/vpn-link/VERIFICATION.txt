@@ -1,0 +1,68 @@
+BRANCH=fix/nosok-vpn-link
+BASE=649a1a847221061ea35ef51032730e8548538b89
+CHANGED_FIELD=app/text.py ALLOWED_SOURCE_LINK_URL
+ALLOWED_SOURCE_LINK_URL=https://t.me/NosokVPNBot?start=partner_8235497168
+POLICY=only exact text_link target; no label, domain, prefix, parameter, button or raw-URL exemption
+STATUS=verified change; VK Cloud live deployment not verified
+QUEUE=new scans/imports only; previously cleaned database records and published posts unchanged
+ENVIRONMENT=Python 3.12 venv; existing requirements-dev.txt; tzdata installed locally for Windows ZoneInfo
+ORIGINAL_SHA256=f5eb054497172d3ff3f9e4cb28e2b883cea04e0ffb226a38ebe03f2f2a2de3aa
+MODIFIED_SHA256=11d70063a2790c829cda7271e3731b1c32c57243df69e9311cdc620c7179341e
+MODIFIED_FILE=C:\BOTS\CROSS\telegram-max-crossposter-fixed\app\text.py
+DIFF_FILE=C:\BOTS\CROSS\telegram-max-crossposter-fixed\artifacts\vpn-link\DIFF.patch
+VERIFICATION_FILE=C:\BOTS\CROSS\telegram-max-crossposter-fixed\artifacts\vpn-link\VERIFICATION.txt
+ROLLBACK_FILE=C:\BOTS\CROSS\telegram-max-crossposter-fixed\artifacts\vpn-link\ROLLBACK.sh
+
+BASELINE_COMMAND=C:\BOTS\CROSS\telegram-max-crossposter-fixed\.venv\Scripts\python.exe -m pytest -q -W error::DeprecationWarning
+BASELINE_INPUT=unmodified automation-queue source at base commit
+........................................................................ [ 67%]
+...................................                                      [100%]
+107 passed in 5.02s
+EXIT_STATUS=0
+
+RED_COMMAND=C:\BOTS\CROSS\telegram-max-crossposter-fixed\.venv\Scripts\python.exe -m pytest tests/test_text.py -q
+RED_INPUT=new regression tests before source changes; exact URL and adversarial variants
+RED_RESULT=3 failed, 28 passed in 0.26s
+RED_EXIT_STATUS=1
+
+MODIFIED_COMMAND=C:\BOTS\CROSS\telegram-max-crossposter-fixed\.venv\Scripts\python.exe -m pytest -q -W error::DeprecationWarning
+MODIFIED_INPUT=exact-link allowlist plus 22 regression cases, including scan and import
+........................................................................ [ 55%]
+.........................................................                [100%]
+129 passed in 8.28s
+EXIT_STATUS=0
+
+LINT_COMMAND=C:\BOTS\CROSS\telegram-max-crossposter-fixed\.venv\Scripts\python.exe -m ruff check app tests
+LINT_OUTPUT=All checks passed!
+LINT_EXIT_STATUS=0
+FORMAT_COMMAND=C:\BOTS\CROSS\telegram-max-crossposter-fixed\.venv\Scripts\python.exe -m ruff format --check app tests
+FORMAT_OUTPUT=28 files already formatted
+FORMAT_EXIT_STATUS=0
+
+ROLLBACK_INPUT=separate modified clone
+COMMAND="C:\Program Files\Git\bin\bash.exe" artifacts/vpn-link/ROLLBACK.sh
+INPUT=separate copy with DIFF.patch applied
+ROLLBACK_RESULT=restored original link filtering and tests
+EXIT_STATUS=0
+RESTORED_SHA256=f5eb054497172d3ff3f9e4cb28e2b883cea04e0ffb226a38ebe03f2f2a2de3aa
+DIFF_CHECK=git diff --exit-code -- README.md app/text.py tests/test_text.py tests/test_telegram_reader.py
+DIFF_EXIT=0
+TEST_COMMAND=C:\BOTS\CROSS\telegram-max-crossposter-fixed\.venv\Scripts\python.exe -m pytest -q -W error::DeprecationWarning
+........................................................................ [ 67%]
+...................................                                      [100%]
+107 passed in 3.89s
+TEST_EXIT_STATUS=0
+
+MODIFIED COMMAND=C:\BOTS\CROSS\telegram-max-crossposter-fixed\.venv\Scripts\python.exe -X utf8 -c "from app.text import TextEntity,clean_telegram_text,render_max_html; u=\"https://t.me/NosokVPNBot?start=partner_8235497168\"; print(\"RESULT=\"+repr(render_max_html(clean_telegram_text(\"Лучший VPN\",[TextEntity(\"text_link\",0,10,u)]))))"
+RESULT='<a href="https://t.me/NosokVPNBot?start=partner_8235497168">Лучший VPN</a>'
+EXIT_STATUS=0
+
+RESTORED COMMAND=C:\BOTS\CROSS\telegram-max-crossposter-fixed\.venv\Scripts\python.exe -X utf8 -c "from app.text import TextEntity,clean_telegram_text,render_max_html; u=\"https://t.me/NosokVPNBot?start=partner_8235497168\"; print(\"RESULT=\"+repr(render_max_html(clean_telegram_text(\"Лучший VPN\",[TextEntity(\"text_link\",0,10,u)]))))"
+RESULT=''
+EXIT_STATUS=0
+
+RESTORED_STATUS=git diff empty for all 4 changed files; original hash matches; VPN hyperlink removed as before
+MODIFIED_FILE_LEFT_CHANGED=yes
+BUILD=Docker build not run; Docker executable absent
+
+PUSH_TARGET=origin refs/heads/fix/nosok-vpn-link

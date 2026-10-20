@@ -1,0 +1,6 @@
+{
+  "branch": "fix/nosok-vpn-link",
+  "base": "649a1a847221061ea35ef51032730e8548538b89",
+  "original_app_text_sha256": "f5eb054497172d3ff3f9e4cb28e2b883cea04e0ffb226a38ebe03f2f2a2de3aa",
+  "modified_app_text_sha256": "11d70063a2790c829cda7271e3731b1c32c57243df69e9311cdc620c7179341e"
+}

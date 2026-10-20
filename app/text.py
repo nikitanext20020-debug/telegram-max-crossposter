@@ -31,6 +31,15 @@ FORMAT_TAGS = {
     "strikethrough": ("<s>", "</s>"),
 }
 FORMAT_ORDER = tuple(FORMAT_TAGS)
+ALLOWED_SOURCE_LINK_URL = "https://t.me/NosokVPNBot?start=partner_8235497168"
+ALLOWED_LINK_STYLE = "allowed_source_link"
+RENDER_TAGS = {
+    **FORMAT_TAGS,
+    ALLOWED_LINK_STYLE: (
+        f'<a href="{html.escape(ALLOWED_SOURCE_LINK_URL, quote=True)}">',
+        "</a>",
+    ),
+}
 VISIBLE_LINK_TYPES = {"url", "email", "mention"}
 HIDDEN_LINK_TYPES = {"text_link", "text_mention"}
 URL_PATTERN = re.compile(
@@ -176,8 +185,17 @@ def clean_telegram_text(
     visible_links = [
         (start, end) for entity, start, end in valid if entity.type in VISIBLE_LINK_TYPES
     ]
+    # Match the full target, not the label, bot name, domain, or URL prefix.
+    allowed_links = [
+        (start, end)
+        for entity, start, end in valid
+        if entity.type == "text_link" and entity.url == ALLOWED_SOURCE_LINK_URL
+    ]
     hidden_links = [
-        (start, end) for entity, start, end in valid if entity.type in HIDDEN_LINK_TYPES
+        (start, end)
+        for entity, start, end in valid
+        if entity.type in HIDDEN_LINK_TYPES
+        and not (entity.type == "text_link" and entity.url == ALLOWED_SOURCE_LINK_URL)
     ]
     link_ranges = list({*raw_links, *visible_links})
     removed = {index for start, end in link_ranges for index in range(start, end)}
@@ -192,8 +210,13 @@ def clean_telegram_text(
         if index in removed:
             continue
         active = {style for style, start, end in formatting if start <= index < end}
+        link_style = (
+            (ALLOWED_LINK_STYLE,)
+            if any(start <= index < end for start, end in allowed_links)
+            else ()
+        )
         characters.append(character)
-        styles.append(tuple(style for style in FORMAT_ORDER if style in active))
+        styles.append(link_style + tuple(style for style in FORMAT_ORDER if style in active))
 
     normalized_text, normalized_styles = _normalize_characters(characters, styles)
     return CleanText(normalized_text, normalized_styles)
@@ -207,13 +230,13 @@ def render_max_html(clean: CleanText) -> str:
         while common < min(len(active), len(desired)) and active[common] == desired[common]:
             common += 1
         for style in reversed(active[common:]):
-            result.append(FORMAT_TAGS[style][1])
+            result.append(RENDER_TAGS[style][1])
         for style in desired[common:]:
-            result.append(FORMAT_TAGS[style][0])
+            result.append(RENDER_TAGS[style][0])
         result.append(html.escape(character, quote=True))
         active = desired
     for style in reversed(active):
-        result.append(FORMAT_TAGS[style][1])
+        result.append(RENDER_TAGS[style][1])
     return "".join(result)
 
 

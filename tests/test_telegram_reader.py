@@ -259,3 +259,33 @@ async def test_download_candidate_writes_large_media_to_disk(reader_setup, tmp_p
     assert files[0].stat().st_size > 20
     assert files[0].read_bytes().startswith(b"video-data-10")
     assert client.downloaded[0][0] == 10
+
+
+@pytest.mark.parametrize("mode", ["scan", "import"])
+@pytest.mark.parametrize("partner", ["8235497168", "999"])
+async def test_reader_keeps_only_the_exact_vpn_partner_link(reader_setup, mode, partner):
+    reader, client, store = reader_setup
+    source = await store.add_source(
+        "https://t.me/animeworldmem",
+        telegram_chat_id=-1000000000777,
+        join_state="joined",
+    )
+    url = f"https://t.me/NosokVPNBot?start=partner_{partner}"
+    caption = "#anime\nЛучший VPN\nАНИМЕ В ТГ"
+    message = video_message(10, text=caption)
+    message.entities = [
+        text_entity("text_link", 7, 10, url),
+        text_entity("text_link", 18, 10, "https://t.me/foreign"),
+    ]
+    client.messages = [message]
+
+    if mode == "scan":
+        result = await reader.scan_source(source, ScanWindow(limit=10))
+        assert result.inserted_candidates == 1
+        candidate = (await store.list_unqueued_candidates())[0]
+    else:
+        candidate_id = await reader.import_post("https://t.me/animeworldmem/10")
+        candidate = await store.get_candidate(candidate_id)
+
+    expected = f'#anime\n<a href="{url}">Лучший VPN</a>' if partner == "8235497168" else "#anime"
+    assert candidate.cleaned_html == expected

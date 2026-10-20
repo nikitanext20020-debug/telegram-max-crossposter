@@ -1,0 +1,233 @@
+diff --git a/README.md b/README.md
+index bbd8808..ec247e4 100644
+--- a/README.md
++++ b/README.md
+@@ -21,8 +21,9 @@ Upstash QStash будит его для сканирования и каждог
+ - правило `14:00 video`, которое можно изменить командой;
+ - фото, видео, альбомы, аудио и документы;
+ - видео больше 20 МБ через Telethon, без ограничения Telegram Bot API;
+-- удаление всех исходных URL, скрытых ссылок, кнопок и `@username`;
+-- обязательная единственная ссылка
++- удаление исходных URL, скрытых ссылок, кнопок и `@username`, кроме одного
++  точного разрешённого адреса VPN в скрытой текстовой ссылке;
++- обязательная ссылка
+   `[НАШ ТГК](https://t.me/webm4ik)` под каждым сообщением MAX;
+ - изменение подписи через Telegram без передеплоя;
+ - подписанные QStash endpoints, атомарные leases и восстановление после сна.
+@@ -172,6 +173,15 @@ Render Free засыпает после простоя. Это ожидаемо:
+ зачёркивание и код сохраняются. Ссылку, нарисованную внутри картинки или видео,
+ текстовый фильтр удалить не может.
+ 
++Единственное исключение для исходных скрытых ссылок (`text_link`) —
++`https://t.me/NosokVPNBot?start=partner_8235497168`. Подпись «Лучший VPN» с этим
++адресом остаётся кликабельной. Сравнивается весь URL без преобразований:
++другой `start`, дополнительный параметр, другой бот или домен не разрешаются.
++Адрес задан именованной константой `ALLOWED_SOURCE_LINK_URL` в `app/text.py`.
++Исключение не копирует кнопки и видимые URL; основная подпись канала сохраняется.
++Оно применяется при новом чтении Telegram-постов; уже сохранённый очищенный текст
++в очереди и ранее опубликованные MAX-посты автоматически не восстанавливаются.
++
+ ## Ограничения медиа
+ 
+ - изображение: до 50 МБ;
+diff --git a/app/text.py b/app/text.py
+index a0fc57d..00d3789 100644
+--- a/app/text.py
++++ b/app/text.py
+@@ -31,6 +31,15 @@ FORMAT_TAGS = {
+     "strikethrough": ("<s>", "</s>"),
+ }
+ FORMAT_ORDER = tuple(FORMAT_TAGS)
++ALLOWED_SOURCE_LINK_URL = "https://t.me/NosokVPNBot?start=partner_8235497168"
++ALLOWED_LINK_STYLE = "allowed_source_link"
++RENDER_TAGS = {
++    **FORMAT_TAGS,
++    ALLOWED_LINK_STYLE: (
++        f'<a href="{html.escape(ALLOWED_SOURCE_LINK_URL, quote=True)}">',
++        "</a>",
++    ),
++}
+ VISIBLE_LINK_TYPES = {"url", "email", "mention"}
+ HIDDEN_LINK_TYPES = {"text_link", "text_mention"}
+ URL_PATTERN = re.compile(
+@@ -176,8 +185,17 @@ def clean_telegram_text(
+     visible_links = [
+         (start, end) for entity, start, end in valid if entity.type in VISIBLE_LINK_TYPES
+     ]
++    # Match the full target, not the label, bot name, domain, or URL prefix.
++    allowed_links = [
++        (start, end)
++        for entity, start, end in valid
++        if entity.type == "text_link" and entity.url == ALLOWED_SOURCE_LINK_URL
++    ]
+     hidden_links = [
+-        (start, end) for entity, start, end in valid if entity.type in HIDDEN_LINK_TYPES
++        (start, end)
++        for entity, start, end in valid
++        if entity.type in HIDDEN_LINK_TYPES
++        and not (entity.type == "text_link" and entity.url == ALLOWED_SOURCE_LINK_URL)
+     ]
+     link_ranges = list({*raw_links, *visible_links})
+     removed = {index for start, end in link_ranges for index in range(start, end)}
+@@ -192,8 +210,13 @@ def clean_telegram_text(
+         if index in removed:
+             continue
+         active = {style for style, start, end in formatting if start <= index < end}
++        link_style = (
++            (ALLOWED_LINK_STYLE,)
++            if any(start <= index < end for start, end in allowed_links)
++            else ()
++        )
+         characters.append(character)
+-        styles.append(tuple(style for style in FORMAT_ORDER if style in active))
++        styles.append(link_style + tuple(style for style in FORMAT_ORDER if style in active))
+ 
+     normalized_text, normalized_styles = _normalize_characters(characters, styles)
+     return CleanText(normalized_text, normalized_styles)
+@@ -207,13 +230,13 @@ def render_max_html(clean: CleanText) -> str:
+         while common < min(len(active), len(desired)) and active[common] == desired[common]:
+             common += 1
+         for style in reversed(active[common:]):
+-            result.append(FORMAT_TAGS[style][1])
++            result.append(RENDER_TAGS[style][1])
+         for style in desired[common:]:
+-            result.append(FORMAT_TAGS[style][0])
++            result.append(RENDER_TAGS[style][0])
+         result.append(html.escape(character, quote=True))
+         active = desired
+     for style in reversed(active):
+-        result.append(FORMAT_TAGS[style][1])
++        result.append(RENDER_TAGS[style][1])
+     return "".join(result)
+ 
+ 
+diff --git a/tests/test_telegram_reader.py b/tests/test_telegram_reader.py
+index 70c6d0b..a84ff09 100644
+--- a/tests/test_telegram_reader.py
++++ b/tests/test_telegram_reader.py
+@@ -259,3 +259,33 @@ async def test_download_candidate_writes_large_media_to_disk(reader_setup, tmp_p
+     assert files[0].stat().st_size > 20
+     assert files[0].read_bytes().startswith(b"video-data-10")
+     assert client.downloaded[0][0] == 10
++
++
++@pytest.mark.parametrize("mode", ["scan", "import"])
++@pytest.mark.parametrize("partner", ["8235497168", "999"])
++async def test_reader_keeps_only_the_exact_vpn_partner_link(reader_setup, mode, partner):
++    reader, client, store = reader_setup
++    source = await store.add_source(
++        "https://t.me/animeworldmem",
++        telegram_chat_id=-1000000000777,
++        join_state="joined",
++    )
++    url = f"https://t.me/NosokVPNBot?start=partner_{partner}"
++    caption = "#anime\nЛучший VPN\nАНИМЕ В ТГ"
++    message = video_message(10, text=caption)
++    message.entities = [
++        text_entity("text_link", 7, 10, url),
++        text_entity("text_link", 18, 10, "https://t.me/foreign"),
++    ]
++    client.messages = [message]
++
++    if mode == "scan":
++        result = await reader.scan_source(source, ScanWindow(limit=10))
++        assert result.inserted_candidates == 1
++        candidate = (await store.list_unqueued_candidates())[0]
++    else:
++        candidate_id = await reader.import_post("https://t.me/animeworldmem/10")
++        candidate = await store.get_candidate(candidate_id)
++
++    expected = f'#anime\n<a href="{url}">Лучший VPN</a>' if partner == "8235497168" else "#anime"
++    assert candidate.cleaned_html == expected
+diff --git a/tests/test_text.py b/tests/test_text.py
+index cfffb36..337366e 100644
+--- a/tests/test_text.py
++++ b/tests/test_text.py
+@@ -125,3 +125,87 @@ def test_signature_is_present_on_textless_and_every_split_post():
+ def test_rejects_invalid_signature(text, url):
+     with pytest.raises(ValueError):
+         build_signature_html(text, url)
++
++
++VPN_URL = "https://t.me/NosokVPNBot?start=partner_8235497168"
++
++
++def test_keeps_exact_partner_vpn_link_and_removes_other_promo():
++    text = "#аниме #animeedit\nЛучший VPN\nАНИМЕ В ТГ\nРеклама https://bad.example"
++    clean = clean_telegram_text(
++        text,
++        [
++            entity("text_link", text, "Лучший VPN", url=VPN_URL),
++            entity("text_link", text, "АНИМЕ В ТГ", url="https://t.me/foreign"),
++        ],
++    )
++
++    assert render_max_html(clean) == (f'#аниме #animeedit\n<a href="{VPN_URL}">Лучший VPN</a>')
++
++
++@pytest.mark.parametrize(
++    "url",
++    [
++        "https://t.me/NosokVPNBot?start=partner_999",
++        "https://t.me/NosokVPNBot",
++        VPN_URL + "&ad=1",
++        VPN_URL + "#ad",
++        VPN_URL + "0",
++        VPN_URL + '" onclick="alert(1)',
++        VPN_URL.replace("https://", "http://"),
++        VPN_URL.replace("t.me/", "t.me.evil.example/"),
++        VPN_URL.replace("t.me/", "t.me@evil.example/"),
++        VPN_URL.replace("NosokVPNBot", "AnotherVPNBot"),
++        VPN_URL.replace("partner_", "partner%5F"),
++        "https://bad.example/?next=" + VPN_URL,
++        "javascript:alert(1)",
++        None,
++    ],
++)
++def test_same_vpn_label_does_not_allow_other_urls(url):
++    text = "Пост\nЛучший VPN"
++    clean = clean_telegram_text(text, [entity("text_link", text, "Лучший VPN", url=url)])
++
++    assert render_max_html(clean) == "Пост"
++
++
++def test_partner_link_survives_emoji_formatting_and_html_escaping():
++    text = '😀 Лучший <VPN> & "тест"'
++    label = 'Лучший <VPN> & "тест"'
++    clean = clean_telegram_text(
++        text,
++        [
++            entity("text_link", text, label, url=VPN_URL),
++            entity("bold", text, label),
++        ],
++    )
++
++    assert render_max_html(clean) == (
++        f'😀 <a href="{VPN_URL}"><b>Лучший &lt;VPN&gt; &amp; &quot;тест&quot;</b></a>'
++    )
++
++
++def test_vpn_exception_does_not_copy_buttons_or_raw_urls():
++    text = "Пост\n" + VPN_URL
++    clean = clean_telegram_text(text, button_urls=[VPN_URL, "https://bad.example"])
++
++    assert render_max_html(clean) == "Пост"
++
++
++def test_only_vpn_and_signature_are_active_after_splitting():
++    text = "😀 " + "Лучший VPN " * 30
++    clean = clean_telegram_text(text, [entity("text_link", text, text[2:], url=VPN_URL)])
++    source = render_max_html(clean)
++    signature = build_signature_html("НАШ ТГК", "https://t.me/webm4ik")
++    chunks = append_signature(source, signature, limit=180)
++
++    assert len(chunks) > 1
++    for chunk in chunks:
++        assert len(chunk) <= 180
++        assert chunk.endswith(signature)
++        assert chunk.count("<a ") == chunk.count("</a>")
++        assert set(re.findall(r'href="([^"]+)"', chunk)) <= {
++            VPN_URL,
++            "https://t.me/webm4ik",
++        }
++    assert VPN_URL in source
